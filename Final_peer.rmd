@@ -1,0 +1,810 @@
+---
+title: "Peer Assessment II"
+output:
+  html_document: 
+    pandoc_args: [
+      "--number-sections",
+    ]
+---
+
+# Background
+
+As a statistical consultant working for a real estate investment firm, your task is to develop a model to predict the selling price of a given home in Ames, Iowa. Your employer hopes to use this information to help assess whether the asking price of a house is higher or lower than the true value of the house. If the home is undervalued, it may be a good investment for the firm.
+
+# Training Data and relevant packages
+
+In order to better assess the quality of the model you will produce, the data have been randomly divided into three separate pieces: a training data set, a testing data set, and a validation data set. For now we will load the training data set, the others will be loaded and used later.
+
+```{r load, message = FALSE}
+load("ames_train") 
+load("ames_test") 
+load("ames_validation")
+```
+
+```{r packages, message = FALSE}
+library(ggplot2)
+library(statsr)
+library(dplyr)
+library(BAS)
+library(GGally)    
+library(gridExtra)
+library(MASS)
+```
+
+## Part 1 - Exploratory Data Analysis (EDA)
+
+When you first get your data, it's very tempting to immediately begin fitting models and assessing how they perform.  However, before you begin modeling, it's absolutely essential to explore the structure of the data and the relationships between the variables in the data set.
+
+* * *
+
+```{r dataset_prep,  include=FALSE}
+# Exclude some variables
+ames_train <- ames_train[,names(ames_train) != "Misc.Feature"]
+ames_train <- ames_train[,names(ames_train) != "Misc.Val"]
+ames_train <- ames_train[,names(ames_train) != "PID"]
+ames_train$Neighborhood <- factor(ames_train$Neighborhood)
+
+# Sale Condition. Exclude unreasonable size per parameter 
+idx <- which(ames_train$Sale.Condition %in% c("Normal"))
+ames_train <- ames_train[idx,]  
+
+ames_train <- ames_train %>%
+   mutate(
+          Lot.Frontage = ifelse(is.na(Lot.Frontage), 0, Lot.Frontage) ,
+          Mas.Vnr.Area = ifelse(is.na(Mas.Vnr.Area), 0, Mas.Vnr.Area),
+          BsmtFin.Type.1 = ifelse(is.na(BsmtFin.Type.1), 0, BsmtFin.Type.1),
+          BsmtFin.SF.1 = ifelse(is.na(BsmtFin.SF.1), 0, BsmtFin.SF.1),
+          BsmtFin.Type.2= ifelse(is.na(BsmtFin.Type.2), 0, BsmtFin.Type.2),
+          BsmtFin.SF.2 = ifelse(is.na(BsmtFin.SF.2), 0, BsmtFin.SF.2),
+          Bsmt.Unf.SF = ifelse(is.na(Bsmt.Unf.SF), 0, Bsmt.Unf.SF),
+          Total.Bsmt.SF = ifelse(is.na(Total.Bsmt.SF), 0, Total.Bsmt.SF),
+          Bsmt.Full.Bath = ifelse(is.na(Bsmt.Full.Bath), 0, Bsmt.Full.Bath),
+          Bsmt.Half.Bath = ifelse(is.na(Bsmt.Half.Bath), 0, Bsmt.Half.Bath),
+          Garage.Yr.Blt = ifelse(is.na(Garage.Yr.Blt), 0, Garage.Yr.Blt)
+          )
+
+levels <- levels(ames_train$Pool.QC)
+levels[length(levels) + 1] <- "NoPool"
+ames_train$Pool.QC <- factor(ames_train$Pool.QC, levels = levels)
+ames_train$Pool.QC[is.na(ames_train$Pool.QC)] <- "NoPool"
+
+levels <- levels(ames_train$Alley) 
+levels[length(levels) + 1] <- "NoAccess"
+ames_train$Alley <- factor(ames_train$Alley, levels = levels)
+ames_train$Alley[is.na(ames_train$Alley)] <- "NoAccess"
+
+levels <- levels(ames_train$Fence)
+levels[length(levels) + 1] <- "None"
+ames_train$Fence <- factor(ames_train$Fence, levels = levels)
+ames_train$Fence[is.na(ames_train$Fence)] <- "None"
+
+levels <- levels(ames_train$Fireplace.Qu)
+levels[length(ames_train$Fireplace.Qu) + 1] <- "None"
+ames_train$Fireplace.Qu <- factor(ames_train$Fireplace.Qu, levels = levels)
+ames_train$Fireplace.Qu[is.na(ames_train$Fireplace.Qu)] <- "None"
+
+
+## BSMT
+levels <- levels(ames_train$Bsmt.Cond)
+levels[length(ames_train$Bsmt.Cond) + 1] <- "None"
+ames_train$Bsmt.Qual <- factor(ames_train$Bsmt.Qual, levels = levels)
+ames_train$Bsmt.Qual[is.na(ames_train$Bsmt.Qual)] <- "None"
+
+levels <- levels(ames_train$Bsmt.Cond)
+levels[length(ames_train$Bsmt.Cond) + 1] <- "None"
+ames_train$Bsmt.Cond <- factor(ames_train$Bsmt.Cond, levels = levels)
+ames_train$Bsmt.Cond[is.na(ames_train$Bsmt.Cond)] <- "None"
+
+levels <- levels(ames_train$Bsmt.Exposure)
+levels[length(ames_train$Bsmt.Exposure) + 1] <- "None"
+ames_train$Bsmt.Exposure <- factor(ames_train$Bsmt.Exposure, levels = levels)
+ames_train$Bsmt.Exposure[is.na(ames_train$Bsmt.Exposure)] <- "None"
+
+levels <- levels(ames_train$BsmtFin.Type.1)
+levels[length(ames_train$Bsmt.Exposure) + 1] <- "None"
+ames_train$Bsmt.Exposure <- factor(ames_train$Bsmt.Exposure, levels = levels)
+ames_train$Bsmt.Exposure[is.na(ames_train$Bsmt.Exposure)] <- "None"
+
+
+## Garage
+# Replacing missing value. Garage year built is replaced with the house year built
+idx <- which(ames_train$Garage.Cars > 0 & is.na(ames_train$Garage.Yr.Blt))
+ames_train[idx, 'Garage.Yr.Blt'] <- ames_train[idx, 'Year.Built']
+ 
+levels <- levels(ames_train$Garage.Type)
+levels[length(ames_train$Garage.Type) + 1] <- "None"
+ames_train$Garage.Type <- factor(ames_train$Garage.Type, levels = levels)
+ames_train$Garage.Type[is.na(ames_train$Garage.Type)] <- "None"
+
+levels <- levels(ames_train$Garage.Cond)
+levels[length(ames_train$Garage.Cond) + 1] <- "None"
+ames_train$Garage.Cond <- factor(ames_train$Garage.Cond, levels = levels)
+ames_train$Garage.Cond[is.na(ames_train$Garage.Cond)] <- "None"
+
+levels <- levels(ames_train$Garage.Finish)
+levels[length(ames_train$Garage.Finish) + 1] <- "None"
+ames_train$Garage.Finish <- factor(ames_train$Garage.Finish, levels = levels)
+ames_train$Garage.Finish[is.na(ames_train$Garage.Finish)] <- "None"
+
+
+ames_train$Garage.Qual <- factor(ames_train$Garage.Qual, levels = levels(ames_train$Garage.Qual)[2:6])
+levels <- levels(ames_train$Garage.Qual) 
+levels[length(ames_train$Garage.Qual) + 1] <- "None"
+ames_train$Garage.Qual <- factor(ames_train$Garage.Qual, levels = levels)
+ames_train$Garage.Qual[is.na(ames_train$Garage.Qual)] <- "None" 
+
+ 
+## Ames test
+idx <- which(ames_test$Sale.Condition %in% c("Normal"))
+ames_test <- ames_test[idx,]   
+
+
+
+ames_test <- ames_test %>%
+  mutate(
+    Lot.Frontage = ifelse(is.na(Lot.Frontage), 0, Lot.Frontage) ,
+    Mas.Vnr.Area = ifelse(is.na(Mas.Vnr.Area), 0, Mas.Vnr.Area),
+    BsmtFin.Type.1 = ifelse(is.na(BsmtFin.Type.1), 0, BsmtFin.Type.1),
+    BsmtFin.SF.1 = ifelse(is.na(BsmtFin.SF.1), 0, BsmtFin.SF.1),
+    BsmtFin.Type.2= ifelse(is.na(BsmtFin.Type.2), 0, BsmtFin.Type.2),
+    BsmtFin.SF.2 = ifelse(is.na(BsmtFin.SF.2), 0, BsmtFin.SF.2),
+    Bsmt.Unf.SF = ifelse(is.na(Bsmt.Unf.SF), 0, Bsmt.Unf.SF),
+    Total.Bsmt.SF = ifelse(is.na(Total.Bsmt.SF), 0, Total.Bsmt.SF),
+    Bsmt.Full.Bath = ifelse(is.na(Bsmt.Full.Bath), 0, Bsmt.Full.Bath),
+    Bsmt.Half.Bath = ifelse(is.na(Bsmt.Half.Bath), 0, Bsmt.Half.Bath),
+    Garage.Yr.Blt = ifelse(is.na(Garage.Yr.Blt), 0, Garage.Yr.Blt)
+  )
+
+
+levels <- levels(ames_test$Fireplace.Qu)
+levels[length(ames_test$Fireplace.Qu) + 1] <- "None"
+ames_test$Fireplace.Qu <- factor(ames_test$Fireplace.Qu, levels = levels)
+ames_test$Fireplace.Qu[is.na(ames_test$Fireplace.Qu)] <- "None"
+
+
+## BSMT
+levels <- levels(ames_test$Bsmt.Qual)
+levels[length(ames_test$Bsmt.Qual) + 1] <- "None"
+ames_test$Bsmt.Qual <- factor(ames_test$Bsmt.Qual, levels = levels)
+ames_test$Bsmt.Qual[is.na(ames_test$Bsmt.Qual)] <- "None"
+
+
+levels <- levels(ames_test$Bsmt.Cond)
+levels[length(ames_test$Bsmt.Cond) + 1] <- "None"
+ames_test$Bsmt.Cond <- factor(ames_test$Bsmt.Cond, levels = levels)
+ames_test$Bsmt.Cond[is.na(ames_test$Bsmt.Cond)] <- "None"
+
+levels <- levels(ames_test$Bsmt.Exposure)
+levels[length(ames_test$Bsmt.Exposure) + 1] <- "None"
+ames_test$Bsmt.Exposure <- factor(ames_test$Bsmt.Exposure, levels = levels)
+ames_test$Bsmt.Exposure[is.na(ames_test$Bsmt.Exposure)] <- "None"
+
+levels <- levels(ames_test$BsmtFin.Type.1)
+levels[length(ames_test$Bsmt.Exposure) + 1] <- "None"
+ames_test$Bsmt.Exposure <- factor(ames_test$Bsmt.Exposure, levels = levels)
+ames_test$Bsmt.Exposure[is.na(ames_test$Bsmt.Exposure)] <- "None"
+
+
+## Garage
+# Replacing missing value. Garage year built is replaced with the house year built
+idx <- which(ames_test$Garage.Cars > 0 & is.na(ames_test$Garage.Yr.Blt))
+ames_test[idx, 'Garage.Yr.Blt'] <- ames_test[idx, 'Year.Built']
+
+levels <- levels(ames_test$Garage.Type)
+levels[length(ames_test$Garage.Type) + 1] <- "None"
+ames_test$Garage.Type <- factor(ames_test$Garage.Type, levels = levels)
+ames_test$Garage.Type[is.na(ames_test$Garage.Type)] <- "None"
+
+levels <- levels(ames_test$Garage.Cond)
+levels[length(ames_test$Garage.Cond) + 1] <- "None"
+ames_test$Garage.Cond <- factor(ames_test$Garage.Cond, levels = levels)
+ames_test$Garage.Cond[is.na(ames_test$Garage.Cond)] <- "None"
+
+levels <- levels(ames_test$Garage.Finish)
+levels[length(ames_test$Garage.Finish) + 1] <- "None"
+ames_test$Garage.Finish <- factor(ames_test$Garage.Finish, levels = levels)
+ames_test$Garage.Finish[is.na(ames_test$Garage.Finish)] <- "None"
+
+levels <- levels(ames_test$Garage.Qual)
+levels[length(ames_test$Garage.Qual) + 1] <- "None"
+ames_test$Garage.Qual <- factor(ames_test$Garage.Qual, levels = levels)
+ames_test$Garage.Qual[is.na(ames_test$Garage.Qual)] <- "None"
+
+levels <- levels(ames_test$Neighborhood) 
+ames_test$Neighborhood <- factor(ames_test$Neighborhood, levels = levels) 
+
+
+## Ames validation
+ames_validation$Neighborhood <- factor(ames_validation$Neighborhood)
+
+# Sale Condition. Exclude unreasonable size per parameter 
+idx <- which(ames_validation$Sale.Condition %in% c("Normal"))
+ames_validation <- ames_validation[idx,]   
+
+ames_validation <- ames_validation %>%
+   mutate(
+          Lot.Frontage = ifelse(is.na(Lot.Frontage), 0, Lot.Frontage) ,
+          Mas.Vnr.Area = ifelse(is.na(Mas.Vnr.Area), 0, Mas.Vnr.Area),
+          BsmtFin.Type.1 = ifelse(is.na(BsmtFin.Type.1), 0, BsmtFin.Type.1),
+          BsmtFin.SF.1 = ifelse(is.na(BsmtFin.SF.1), 0, BsmtFin.SF.1),
+          BsmtFin.Type.2= ifelse(is.na(BsmtFin.Type.2), 0, BsmtFin.Type.2),
+          BsmtFin.SF.2 = ifelse(is.na(BsmtFin.SF.2), 0, BsmtFin.SF.2),
+          Bsmt.Unf.SF = ifelse(is.na(Bsmt.Unf.SF), 0, Bsmt.Unf.SF),
+          Total.Bsmt.SF = ifelse(is.na(Total.Bsmt.SF), 0, Total.Bsmt.SF),
+          Bsmt.Full.Bath = ifelse(is.na(Bsmt.Full.Bath), 0, Bsmt.Full.Bath),
+          Bsmt.Half.Bath = ifelse(is.na(Bsmt.Half.Bath), 0, Bsmt.Half.Bath),
+          Garage.Yr.Blt = ifelse(is.na(Garage.Yr.Blt), 0, Garage.Yr.Blt)
+          )
+ 
+
+levels <- levels(ames_validation$Fireplace.Qu)
+levels[length(ames_validation$Fireplace.Qu) + 1] <- "None"
+ames_validation$Fireplace.Qu <- factor(ames_validation$Fireplace.Qu, levels = levels)
+ames_validation$Fireplace.Qu[is.na(ames_validation$Fireplace.Qu)] <- "None"
+
+
+## BSMT
+levels <- levels(ames_validation$Bsmt.Qual)
+levels[length(ames_validation$Bsmt.Qual) + 1] <- "None"
+ames_validation$Bsmt.Qual <- factor(ames_validation$Bsmt.Qual, levels = levels)
+ames_validation$Bsmt.Qual[is.na(ames_validation$Bsmt.Qual)] <- "None"
+
+
+levels <- levels(ames_validation$Bsmt.Cond)
+levels[length(ames_validation$Bsmt.Cond) + 1] <- "None"
+ames_validation$Bsmt.Cond <- factor(ames_validation$Bsmt.Cond, levels = levels)
+ames_validation$Bsmt.Cond[is.na(ames_validation$Bsmt.Cond)] <- "None"
+
+levels <- levels(ames_validation$Bsmt.Exposure)
+levels[length(ames_validation$Bsmt.Exposure) + 1] <- "None"
+ames_validation$Bsmt.Exposure <- factor(ames_validation$Bsmt.Exposure, levels = levels)
+ames_validation$Bsmt.Exposure[is.na(ames_validation$Bsmt.Exposure)] <- "None"
+
+levels <- levels(ames_validation$BsmtFin.Type.1)
+levels[length(ames_validation$Bsmt.Exposure) + 1] <- "None"
+ames_validation$Bsmt.Exposure <- factor(ames_validation$Bsmt.Exposure, levels = levels)
+ames_validation$Bsmt.Exposure[is.na(ames_validation$Bsmt.Exposure)] <- "None"
+
+
+## Garage
+# Replacing missing value. Garage year built is replaced with the house year built
+idx <- which(ames_validation$Garage.Cars > 0 & is.na(ames_validation$Garage.Yr.Blt))
+ames_validation[idx, 'Garage.Yr.Blt'] <- ames_validation[idx, 'Year.Built']
+ 
+levels <- levels(ames_validation$Garage.Type)
+levels[length(ames_validation$Garage.Type) + 1] <- "None"
+ames_validation$Garage.Type <- factor(ames_validation$Garage.Type, levels = levels)
+ames_validation$Garage.Type[is.na(ames_validation$Garage.Type)] <- "None"
+
+levels <- levels(ames_validation$Garage.Cond)
+levels[length(ames_validation$Garage.Cond) + 1] <- "None"
+ames_validation$Garage.Cond <- factor(ames_validation$Garage.Cond, levels = levels)
+ames_validation$Garage.Cond[is.na(ames_validation$Garage.Cond)] <- "None"
+
+levels <- levels(ames_validation$Garage.Finish)
+levels[length(ames_validation$Garage.Finish) + 1] <- "None"
+ames_validation$Garage.Finish <- factor(ames_validation$Garage.Finish, levels = levels)
+ames_validation$Garage.Finish[is.na(ames_validation$Garage.Finish)] <- "None"
+
+levels <- levels(ames_validation$Garage.Qual)
+levels[length(ames_validation$Garage.Qual) + 1] <- "None"
+ames_validation$Garage.Qual <- factor(ames_validation$Garage.Qual, levels = levels)
+ames_validation$Garage.Qual[is.na(ames_validation$Garage.Qual)] <- "None"
+
+levels <- levels(ames_validation$Neighborhood) 
+ames_validation$Neighborhood <- factor(ames_validation$Neighborhood, levels = levels) 
+ 
+```
+I have completed EDA of the ames_train data set, to learn about the structure of the data and the relationships between the variables in the data set. Below 3 plots I found  most informative during EDA process.
+
+The mantra in real estate is “Location, Location, Location!". The median is  preferred in this summary statistic due to high variability and outliers.
+
+```{r eda_plot1, echo=TRUE}
+ggplot(data = ames_train, aes(x = reorder(Neighborhood, price, FUN=median), y = price/1000, group = Neighborhood)) +
+  geom_boxplot(fill="lightgreen", varwidth = TRUE)  +
+  labs(y = "Price in thousands", x = "Neighborhood", title = "Price range by Neighborhood")   +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=0.5))
+```
+
+The below summary statistics shows that NridgHt($305,500) and StoneBr($255,500) Neighborhood are the most expensive, as well as the most heterogenous neighborhoods.  
+
+```{r creategraphs}
+ames_location <-ames_train%>%
+  dplyr::select(price, Year.Built, Neighborhood) %>%
+  group_by(Neighborhood)%>%
+  summarise(max = max(price), min = min(price), median = median(price), sd = sd(price), year = median(Year.Built))
+
+arrange(ames_location, desc(median, sd))  %>% head()
+```
+
+MeadowV($85,750) and BrDale($100,500) are in opposite having the lowest median price with much older houses in the area. 
+```{r }
+arrange(ames_location, median) %>% head()
+```
+
+
+
+The overall material and finish of the house is usually higher for the newer houses, thus the price is positively correlated.
+```{r eda_plot2}
+ggplot(data = ames_train, aes(y = price/1000, x = Year.Built, color =  Overall.Qual)) +  
+  geom_point(alpha = 0.5) + 
+  stat_smooth( method = "lm") +
+  scale_colour_gradientn(colours = terrain.colors(10)) +
+  ggtitle("Price distribution by Year Built and Overall Quality") +
+  ylab("Price (thousands of dollars)")
+```
+
+
+
+The below plot represents price distribution among different dwelling types. Single-family detached houses have the speepest slope, while 2-family houses originally built as a one-family dwelling has the lowest slope.
+
+```{r eda_plot3}
+
+ggplot(data = ames_train, aes(x = area, y = price/1000, color = Bldg.Type)) +  
+  geom_point(alpha = 0.6) + 
+  stat_smooth( method = "lm") +
+  scale_colour_discrete( 
+                       name="Type of Dwelling",
+                       breaks=c("1Fam", "2fmCon","Duplex", "Twnhs", "TwnhsE"),
+                       labels=c("Single - family Detached","Two-family Conversation","Duplex", "Townhouse End Unit", "Townhouse Inside Unit")) +
+   ylab("Price (thousands of dollars)")
+```
+
+Here we reviewed only 3 plots with 4 variables, but the data set has many more interesting variables to review and use in the modeling. Below correlation matrix will help to identify variables for further modeling.
+
+```{r correlation}
+ggcorr(ames_train[,c(2,3:78)], size = 3, ,  angle = 90, hjust = 0, nbreaks = 6) 
+ggpairs(ames_train[,c(2, 17, 18, 29, 32, 54)])
+```
+* * *
+
+## Part 2 - Development and assessment of an initial model, following a semi-guided process of analysis
+
+### Section 2.1 An Initial Model
+In building a model, it is often useful to start by creating a simple, intuitive initial model based on the results of the exploratory data analysis. 
+
+Based on EDA, I selected following variables for the initial model:
+
+Variable        | Description                                                                                    |
+----------------|------------------------------------------------------------------------------------------------|
+Lot.Area        | Lot size in square feet. Land size is highly correlated with price. 
+area            | Living area square feet. House size is highly correlated with price. 
+Neighborhood    | Physical locations within Ames city limits. Location is very important for many buyers. The above EDA shows different price range in different Neighborhood.
+Overall.Qual    | Rates the overall material and finish of the house. The quality of material, and it's condition influence the price
+Year.Built      | Original construction date. Newer houses cost more.
+Bldg.Type       | Type of dwelling. EDA above shows that dwelling type is very important.
+TotRms.AbvGrd   | Total rooms above grade (does NOT include bathrooms). Number of rooms is very important for big families.
+Garage.Cars     | Size of garage in car capacity. 
+Full.Bath       | Full bathrooms above grade. Number of bathroom is another important feature. EDA shows houses with 2 bathroom are a bit more expensive than houses with 1 bathroom
+Half.Bath       | Half baths above grade. EDA shows houses with 2 bathroom are a bit more expensive than houses with 1 bathroom
+ 
+The logarithmic transformation will be used for the price and Lot.Area variables due to their skewness. By using the logarithm of variable, we obtain a more normally distributed variable that is more suitable for liniar regression modeling. The area variable is right skewed as well, but the model performs better without log(area).
+
+```{r fit_model}
+# Lograrithmic transformation
+ames_train <- ames_train %>% 
+  mutate(log_price=log(price), log_area = log(area), log_lotarea = log(Lot.Area))
+
+df.initial.model <- dplyr::select(ames_train, 
+                                  log_price,
+                                  log_lotarea,
+                                  area,
+                                  Neighborhood,
+                                  Overall.Qual,
+                                  Year.Built,
+                                  Bldg.Type,
+                                  TotRms.AbvGrd,
+                                  Garage.Cars,
+                                  Full.Bath, 
+                                  Bsmt.Full.Bath)
+
+initial.model <- lm(log_price ~ . - log_price,data = df.initial.model)  
+ 
+summary(initial.model) 
+```
+
+This model does a pretty good job of prediction with an R-squared value of 0.907. R-squared is a statistical measure of how close the data are to the fitted regression line. R-squared closure to indicates that the model explains the variability of the response data around its mean.
+
+* * *
+
+### Section 2.2 Model Selection
+
+In this section I will use stepwise selection procedure to choose the "best" model based on initial model. I will use AIC and BIC methods and compare results. 
+Additionally, I will use `BAS` R package and  Bayesian model averaging (BMA), which involves averaging over many possible models. BMA can be used for prediction, averaging predictions from multiple models according to their posterior probabilities.
+
+```{r BIC_initial_model} 
+initial.model.BIC <- bas.lm(
+                    log_price ~ 
+                    log_lotarea +
+                    area +
+                    Neighborhood +
+                    Overall.Qual +
+                    Year.Built +
+                    Bldg.Type +
+                    TotRms.AbvGrd +
+                    Garage.Cars +
+                    Bsmt.Full.Bath +
+                    Full.Bath
+                    ,data = ames_train, prior = "BIC", modelprior=uniform())
+
+predict.train.initial.model.BIC <- predict(initial.model.BIC, newdata = ames_train, estimator="BMA")
+
+ames_train <- ames_train %>% mutate(
+  res.log_price = log_price - predict.train.initial.model.BIC$fit,
+  predicted.price = price / exp(res.log_price),
+  residual = price - predicted.price,
+  predicted.log.price = predict.train.initial.model.BIC$fit
+)
+
+r2 = 1 - sum(ames_train$res.log_price^2)/sum((ames_train$log_price-mean(ames_train$log_price))^2)
+r2
+ 
+```
+
+$$BIC: \ R^2 = 0.8892 $$  
+
+
+```{r}  
+image(initial.model.BIC, rotate = F) 
+```
+
+```{r AIC_initial_model}
+initial.model.AIC <- bas.lm(
+                    log_price ~ 
+                    log_lotarea +
+                    area +
+                    Neighborhood +
+                    Overall.Qual +
+                    Year.Built +
+                    Bldg.Type +
+                    TotRms.AbvGrd +
+                    Garage.Cars +
+                    Bsmt.Full.Bath +
+                    Full.Bath
+                    ,data = ames_train, prior = "AIC", modelprior=uniform())
+
+predict.train.initial.model.AIC <- predict(initial.model.AIC, newdata = ames_train, estimator="BMA")
+
+ames_train <- ames_train %>% mutate(
+  res.log_price = log_price - predict.train.initial.model.AIC$fit,
+  predicted.price = price / exp(res.log_price),
+  residual = price - predicted.price,
+  predicted.log.price = predict.train.initial.model.AIC$fit
+)
+
+r2 = 1 - sum(ames_train$res.log_price^2)/sum((ames_train$log_price-mean(ames_train$log_price))^2)
+r2
+
+round(summary(initial.model.AIC),2)
+```
+$$AIC: \ R^2 = 0.9069 $$  
+```{r}  
+image(initial.model.AIC, rotate = F) 
+```
+
+The AIC model has higher Adjusted R-squared 0.907 compare to BIC model with Adjusted R-squared 0.8892.
+
+BIC model has lesser predictor variables resulting in more parsimonious  model which is great for interpretation. But  BIC is best for explanation as it is allows consistent estimation of the underlying data generating process.
+
+The model using AIC as criteria using more predictor varibales which is better to maximize predictive discrimination.
+
+As the main purpose of the assessment is predicting the price, I will chose the AIC model as it fulfills objective better.
+
+* * *
+
+### Section 2.3 Initial Model Residuals
+One way to assess the performance of a model is to examine the model's residuals. 
+
+```{r model_resid}
+plot(initial.model.AIC, which = c(1,4) )
+layout(matrix(c(1,2), 1, 2, byrow = TRUE))
+hist(ames_train$log_price - ames_train$predicted.log.price, breaks = 30)
+qqnorm(ames_train$log_price - ames_train$predicted.log.price)
+qqline(ames_train$log_price - ames_train$predicted.log.price) 
+```
+
+The model  has few outliers:
+
+- 611 is a Commercial property. Having only 5 comercial properties in the data set, we have not enough observations, and therefore the price is overpredicted.  
+
+- 423 has garage in Poor quality, the variable Garage.Qual will be included in the final model.
+
+Other than heavy tails on the normal distribution of the residuals (the difference between the observed value and the predicted value), there does not appear to exist any major assumption violation in the residuals plot. As the sample number is quite large, it should not be a problem.  
+
+
+* * *
+
+### Section 2.4 Initial Model RMSE
+
+In general, the better the model fits, the lower RMSE.  The residuals from the initial model exhibit a standard deviation, and RMSE is $20,143.
+
+```{r model_rmse} 
+ames.train.initial.rmse <- sqrt(mean((ames_train$residual)^2))
+ames.train.initial.rmse
+```
+
+* * *
+
+### Section 2.5 Overfitting 
+
+We next test the initial model with out-of-sample data. This will give indication if the model perform well or not ("overfitting"). 
+
+In order to run the model on a test data set we need to remove 1 property from ames_test in the Landmrk Neighbohood as it was not represented on ames_test. Without re-training, the model cannot accomodate a new neighbohood.
+
+The model achieves $R^2$ = 0.9069 with RMSE of $20,143. Compared to results in training, that is a 1.34% decrease in $R^2$ and a $1,068 increase in RMSE. These differences are reasonable, and yield a successful test of our model on out-of-sample data.
+
+```{r loadtest, message = FALSE} 
+ames_test <- ames_test %>%
+  filter(Neighborhood != 'Landmrk')
+
+ames_test <- ames_test %>% 
+  mutate(log_price=log(price), log_area = log(area), log_lotarea = log(Lot.Area))
+
+initial.test.model.AIC <- predict(initial.model.AIC, newdata = ames_test, estimator="BMA")
+
+ames_test <- ames_test %>% mutate(
+  res.log_price = log_price - initial.test.model.AIC$fit,
+  predicted.price = price / exp(res.log_price),
+  residual = price - predicted.price,
+  predicted.log.price = initial.test.model.AIC$fit
+)
+
+r2 = 1 - sum(ames_test$res.log_price^2)/sum((ames_test$log_price-mean(ames_test$log_price))^2)
+r2
+
+ames.test.initial.rmse <- sqrt(mean((ames_test$residual)^2))
+ames.test.initial.rmse
+
+```
+
+Residuals distribution is very similar to the initial model.
+```{r} 
+plot(ames_test$log_price - ames_test$predicted.log.price, main = 'Residuals')
+layout(matrix(c(1,2), 1, 2, byrow = TRUE))
+hist(ames_test$log_price - ames_test$predicted.log.price, breaks = 10)
+qqnorm(ames_test$log_price - ames_test$predicted.log.price)
+qqline(ames_test$log_price - ames_test$predicted.log.price)
+```
+
+
+## Part 3 Development of a Final Model
+
+### Section 3.1 Final Model
+
+The final model has $R^2$ = 0.94 and RSME = $16,187. Compared to the initial model, that is a 18.9% decrease in RMSE.
+
+There is not much trouble with outliers, which were discussed in the initial model testing.  
+
+```{r model_playground} 
+final.model.AIC <- bas.lm(log_price ~ 
+                   log_lotarea +
+                   area +
+                   Neighborhood +
+                   Overall.Qual +
+                   Exter.Qual+
+                   Year.Built +
+                   Bldg.Type  + 
+                   TotRms.AbvGrd +
+                   Overall.Cond +
+                   Garage.Cars +
+                   Full.Bath +
+                   Bsmt.Full.Bath +
+                   Kitchen.Qual + 
+                   Total.Bsmt.SF +
+                   Garage.Qual,
+                   data = ames_train, 
+                   prior = "AIC", modelprior=uniform())  
+ 
+image(final.model.AIC, rotate = F)  
+round(summary(final.model.AIC),2)
+predict.train.final.model.AIC <- predict(final.model.AIC, newdata = ames_train, estimator="BMA")
+
+ames_train <- ames_train %>% mutate( 
+  res.log_price = log_price - predict.train.final.model.AIC$fit,
+  predicted.price = price / exp(res.log_price),
+  residual = price - predicted.price,
+  predicted.log.price = predict.train.final.model.AIC$fit)
+
+r2 = 1 - sum(ames_train$res.log_price^2)/sum((ames_train$log_price-mean(ames_train$log_price))^2)
+r2
+
+ames_train_rmse <- sqrt(mean((ames_train$residual)^2))
+ames_train_rmse
+
+plot(final.model.AIC, which = 1 )
+ 
+layout(matrix(c(1,2), 1, 2, byrow = TRUE))
+hist(ames_train$log_price - ames_train$predicted.log.price, breaks = 30)
+qqnorm(ames_train$log_price - ames_train$predicted.log.price)
+qqline(ames_train$log_price - ames_train$predicted.log.price)
+```
+
+* * *
+
+### Section 3.2 Transformation
+
+As mentioned in the Section 2.1 the following variables were log-transformed: price and Lot.Area. The reason for doing it is that all of them are right skewed. It was mentioned that the area variable performs bit better than log(area).  
+
+Misc.Feature, Misc.Val, PID cannot be generalized to be used as a meaningful variable, so they were supressed.  
+
+Variables with missing value were replaced to None or 0 value according to variable type.
+
+As houses with non-normal selling condition exhibit atypical behavior and can disproportionately influence the model, the model was built for only normal sale condition.
+
+
+### Section 3.3 Variable Interaction
+
+Interaction effects occur when the effect of one variable depends on the value of another variable. Interaction effects are common in regression analysis, ANOVA, and designed experiments. Variable interactions were not included in the model.
+ 
+
+### Section 3.4 Variable Selection
+
+Home price is determined by its location, its size, its age and its quality. As location variable, I choose Neighborhood. As size variables, I included area, log(Lot.Area), Basement square feet "Total.Bsmt.SF"".  As age variable I included "Year.Built". As quality variables, I included “Overall.Qual”, “Overall.Cond”, “Kitchen.Qual”, "Garage.Qual", “Exter.Qual”, "Full.Bath"  and "Bsmt.Full.Bath".
+
+I used the backward elimination BIC and AIC methods. AIC model performed better, while BIC was having more parsimonious  model. As the main purpose of the project is predicting the price, I chose the AIC model as it fulfills objective better. Additionally, Bayesian model averaging (BMA) is utilised for averaging over many possible models.  
+
+Some variables are not included due to remote relationship to the price, some other variables are not included due to the collinearity with variables which are included in this model. For example, Garage.Cars and Garage.Area are correlated, so only Garage.Cars was used in the model.
+ 
+
+### Section 3.5 Model Testing
+
+How did testing the model on out-of-sample data affect whether or how you changed your model? Explain in a few sentences.
+
+The model achieves $R^2$ = 0.9268 with RMSE of $17,842. Compared to results in training, that is a 1.4% decrease in $R^2$ and a $1,655 increase in RMSE. These differences are reasonable, and yield a successful test of our model on out-of-sample data.
+ 
+```{r model_testing}
+final.test.model.AIC <- predict(final.model.AIC, newdata = ames_test, estimator="BMA")
+
+ames_test <- ames_test %>% mutate(
+  res.log_price = log_price - final.test.model.AIC$fit,
+  predicted.price = price / exp(res.log_price),
+  residual = price - predicted.price,
+  predicted.log.price = final.test.model.AIC$fit
+)
+
+r2 = 1 - sum(ames_test$res.log_price^2)/sum((ames_test$log_price-mean(ames_test$log_price))^2)
+r2
+
+ames.test.final.rmse <- sqrt(mean((ames_test$residual)^2))
+ames.test.final.rmse
+ 
+plot(ames_test$res.log_price, main= 'Residulas')
+ 
+layout(matrix(c(1,2), 1, 2, byrow = TRUE))
+hist(ames_test$log_price - ames_test$predicted.log.price, breaks = 30)
+qqnorm(ames_test$log_price - ames_test$predicted.log.price)
+qqline(ames_test$log_price - ames_test$predicted.log.price)
+```
+
+* * *
+
+## Part 4 Final Model Assessment
+
+### Section 4.1 Final Model Evaluation
+
+Overall, the model might be considered quite successful in terms of ability to usefully explain the variation in sale price ($R^2$ = 0.94) and only 6% of the variation in price remained unexplained by this model.
+
+Notable weaknesses are the following:
+
+* A small but seemingly significant number of houses sell for much less than predicted.
+
+* The model cannot predict prices in one neighborhood Landmrk which was absent from the training data. 
+
+* The model can be used for residential property only.
+
+* The model could be used for propery with the area below 36,000 sq.ft and Lot.Area 215,000 sq.ft.  
+
+* Being trained with data from the Great Recession, the model has a very unrealistic assumption that prices never increase with time.
+
+
+### Section 4.2 Final Model Validation
+Finally we check the model a separate, validation data set, which hasn’t been used for testing until now. The results are very similar to those with  ames_test, and again the difference with ames_train is reasonable.
+ 
+ames_train:      $R^2$ = 0.94,   RMSE = $16,187
+
+ames_test:       $R^2$ = 0.9268 ,RMSE = $17,842
+
+ames_validation: $R^2$ = 0.9212, RMSE = $18,270
+
+
+```{r validation, message = FALSE}
+ames_validation <- ames_validation %>% 
+  mutate(log_price=log(price), log_area = log(area), log_lotarea = log(Lot.Area))
+
+predict.validation.final.model.AIC <- predict(final.model.AIC, newdata = ames_validation, estimator="BMA")
+ames_validation <- ames_validation %>% mutate(
+  res.log_price = log_price - predict.validation.final.model.AIC$fit,
+  predicted.price = price / exp(res.log_price),
+  residual = price - predicted.price,
+  predicted.log.price = predict.validation.final.model.AIC$fit
+)
+ 
+r2 = 1 - sum(ames_validation$res.log_price^2)/sum((ames_validation$log_price-mean(ames_validation$log_price))^2)
+r2
+
+ames_validationt_rmse <- sqrt(mean((ames_validation$residual)^2))
+ames_validationt_rmse
+
+
+plot(ames_validation$log_price - ames_validation$predicted.log.price, main = 'Residuals')
+ 
+layout(matrix(c(1,2), 1, 2, byrow = TRUE))
+hist(ames_validation$log_price - ames_validation$predicted.log.price, breaks = 30)
+qqnorm(ames_validation$log_price - ames_validation$predicted.log.price)
+qqline(ames_validation$log_price - ames_validation$predicted.log.price)
+```
+
+There are very heavy tails, indicating a problem with a small but significant number of large-magnitude residuals (both positive and negative).
+
+
+Finally, to assess how well our model reflects uncertainty I will determine its coverage probability. The coverage probability of 0.949 is quite close to the assumed one of 95%,  which indicates that the final Bayesian model accurately reflects expected uncertainty.
+
+```{r validation_coverage}
+predict.validation <- predict(final.model.AIC, ames_validation,  estimator="BMA",  
+                              prediction=TRUE, se.fit=TRUE)
+predict.df = as.data.frame(cbind(confint(predict.validation), price = ames_validation$log_price))
+# Fix names in dataset
+colnames(predict.df)[1:2] <- c("lwr", "upr")
+
+# Get Coverage
+coverage.prob.validation <- predict.df %>% summarize(cover = sum(price >= lwr & price <= upr)/n())
+coverage.prob.validation 
+```
+
+43 houses are not in 95% confidence interval which deserve further investigation to determine the model weekness and possible improvements. The below plot respresents Neighbohood residuals of these 43 houses. Negative residuals indicate that the asking price is lower than the predicted price and positive residuals indicate that the asking price is greater the predicted price. Veenker, ClearCr, OldTown, Gilbert shold be check at first with the highest residuals in the data set.
+```{r valuation}
+ames_validation <- ames_validation%>%
+        mutate(valuation =ifelse(residual < 0, "Over-Valued", "Under-Valued"))
+
+idx <- which(predict.df$price < predict.df$lwr | predict.df$price > predict.df$upr)
+
+ames_validation[idx, c("PID", "price", "area", "Lot.Area", "Neighborhood", "predicted.price", "residual", "valuation") ]  
+
+
+ggplot(data = ames_validation[idx,], aes(x = reorder(Neighborhood, residual, FUN=median), y = residual, group = Neighborhood, color = valuation)) +
+  geom_boxplot(fill="lightgreen", varwidth = TRUE)  +
+  labs(y = "Residuals, in US Dollars", x = "Neighborhood", title = "Residuals by Neighborhood")   +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=0.5))
+```
+
+The scatter plot below shows which homes are estimated to be over-valued  and under-valued. The summary shows that about half of the houses are over-valued and the other half are under-valued, which is what we expect since the residuals are normally distributed.
+
+```{r val_plot}
+ames_validation %>%
+  group_by(valuation) %>%
+  summarise(n = n()) 
+
+ggplot(ames_validation, aes(x=predicted.log.price, y=log_price, color = valuation)) +
+  geom_point(alpha = .3) +
+  geom_smooth(method='lm', formula=y~x, se=FALSE, colour="black", size=.5) +
+  theme(legend.title=element_blank()) +
+  labs(title="Post-Model Valuation of Houses", x="Fitted Log(price)", y= "Log(price)")  +
+  scale_color_manual(values = c("Under-Valued" = "green",'Over-Valued' = 'red'))
+ 
+```
+
+## Part 5 Conclusion
+A multiple linear regression model was developed to predict the selling price of a given home in Ames, Iowa. 16 out of the original 80 variables were used in the model.
+
+The model is restricted to the houses that:
+
+- were sold under normal conditions
+
+- without pools
+
+- only residential properties
+
+- with the area below 36,000 sq.ft and Lot.Area 215,000 sq.ft. 
+
+- price below $615,000
+ 
+ 
+The model archives $R^2$ = 0.92 and RMSE = $18,270 (which is 11% of average price) on out-of-sample data. 
+
+The model needs further retraining to include Landmrk Neighboorhood. Further investigation is needed regarding a small but significant number of very large residuals, which may lead to new insights in modeling. 
+
+Under-valued houses could be a good investment for real estate firm. The degree of “under-valuing” should be considered because it determines the feasibility of profiting and the profit margin itself.
+
+## Appendix
+```{r dataset_prep1, ref.label='dataset_prep', eval = FALSE}
+```
