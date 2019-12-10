@@ -1,10 +1,15 @@
 ---
 title: "Peer Assessment II"
-output:
-  html_document: 
-    pandoc_args: [
-      "--number-sections",
-    ]
+#output: 
+#  html_document: 
+#    fig_height: 4
+#    highlight: pygments
+#    theme: spacelab
+output: 
+  md_document:
+    variant: markdown_github
+    toc: true
+    fig_height: 4
 ---
 
 # Background
@@ -353,11 +358,34 @@ ggplot(data = ames_train, aes(x = area, y = price/1000, color = Bldg.Type)) +
 Here we reviewed only 3 plots with 4 variables, but the data set has many more interesting variables to review and use in the modeling. Below correlation matrix will help to identify variables for further modeling.
 
 ```{r correlation}
-ggcorr(ames_train[,c(2,3:78)], size = 3, ,  angle = 90, hjust = 0, nbreaks = 6) 
-ggpairs(ames_train[,c(2, 17, 18, 29, 32, 54)])
-```
-* * *
+ggcorr(ames_train[,c(2,3:77)], size = 3, angle = 90, hjust = 0, nbreaks = 6)
 
+ggpairs(ames_train[,c(2,17)], lower = list(continuous='smooth')) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1),
+              axis.text.y = element_text(angle = 45, hjust = 1)
+              )
+
+ggpairs(ames_train[,c(2,18)], lower = list(continuous='smooth')) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1),
+              axis.text.y = element_text(angle = 45, hjust = 1)
+              )
+
+ggpairs(ames_train[,c(2,29)], lower = list(continuous='smooth')) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1),
+              axis.text.y = element_text(angle = 45, hjust = 1)
+              )
+
+ggpairs(ames_train[,c(2,32)], lower = list(continuous='smooth')) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1),
+              axis.text.y = element_text(angle = 45, hjust = 1)
+              )
+ggpairs(ames_train[,c(2,54)], lower = list(continuous='smooth')) +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1),
+              axis.text.y = element_text(angle = 45, hjust = 1)
+              ) 
+```
+
+* * *
 ## Part 2 - Development and assessment of an initial model, following a semi-guided process of analysis
 
 ### Section 2.1 An Initial Model
@@ -702,7 +730,7 @@ Finally we check the model a separate, validation data set, which hasn’t been 
  
 ames_train:      $R^2$ = 0.94,   RMSE = $16,187
 
-ames_test:       $R^2$ = 0.9268 ,RMSE = $17,842
+ames_test:       $R^2$ = 0.9268, RMSE = $17,842
 
 ames_validation: $R^2$ = 0.9212, RMSE = $18,270
 
